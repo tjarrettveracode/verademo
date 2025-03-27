@@ -50,57 +50,112 @@ jobs:
       with:
         name: CodePackage
         path: '**/*.war'
+
+  pipeline_scan:
+      needs: build
+      runs-on: ubuntu-latest
+      name: pipeline scan
+      steps:
+        - name: checkout repo
+          uses: actions/checkout@v3
+
+        - name: get archive
+          uses: actions/download-artifact@v4
+          with:
+            name: verademo.war
+        - name: pipeline-scan action step
+          id: pipelien-scan
+          uses: veracode/Veracode-pipeline-scan-action@esd-true
+          with:
+            vid: ${{ secrets.VID }}
+            vkey: ${{ secrets.VKEY }}
+            file: "verademo.war" 
+            request_policy: "VeraDemo Policy"
+            debug: 1
+            fail_build: false
+
+  veracode-fix:
+    runs-on: ubuntu-latest
+    needs: pipeline_scan
+    name: create fixes
+    permissions: write-all
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v3
+
+      - name: get flaw file
+        uses: actions/download-artifact@v4
+        with:
+          name: Veracode Pipeline-Scan Results
+          
+      - name: Create fixes from static findings
+        id: convert
+        uses: Veracode/veracode-fix@main
+        with:
+          inputFile: results.json
+          vid: ${{ secrets.VID }}
+          vkey: ${{ secrets.VKEY }}
+          source_base_path_1: "com/:src/main/java/com/"
+          source_base_path_2: "WEB-INF:src/main/webapp/WEB-INF"
+          language: java
+          cwe: 89,117
+          fixType: 'single'
+          debug: false
+          prComment: true
+          files: 'all'
+          codeSuggestion: false
+          createPR: true
   
-  pipeline-scan:
-    needs: build
-    runs-on: ubuntu-latest
-    container: 
-      image: veracode/pipeline-scan:latest
-      options: --user root # our normal luser doesn't have privs to write to github directories
+  # pipeline-scan:
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   container: 
+  #     image: veracode/pipeline-scan:latest
+  #     options: --user root # our normal luser doesn't have privs to write to github directories
 
-    steps:
-    - name: Retrieve artifact
-      uses: actions/download-artifact@v2
-      with:
-        name: CodePackage
-        path: /github/home
+  #   steps:
+  #   - name: Retrieve artifact
+  #     uses: actions/download-artifact@v2
+  #     with:
+  #       name: CodePackage
+  #       path: /github/home
     
-    #  Submit  project to pipeline scan
-    - name: Pipeline Scan
-      run: |
-        cd /github/home/target
-        java -jar /opt/veracode/pipeline-scan.jar --veracode_api_id="${{secrets.VERACODE_API_ID}}" --veracode_api_key="${{secrets.VERACODE_API_KEY}}" --fail_on_severity="Very High, High" --file="verademo.war" --app_id="${{secrets.VERACODE_APP_ID}}" --json_output_file="results.json"
-      continue-on-error: true
+  #   #  Submit  project to pipeline scan
+  #   - name: Pipeline Scan
+  #     run: |
+  #       cd /github/home/target
+  #       java -jar /opt/veracode/pipeline-scan.jar --veracode_api_id="${{secrets.VERACODE_API_ID}}" --veracode_api_key="${{secrets.VERACODE_API_KEY}}" --fail_on_severity="Very High, High" --file="verademo.war" --app_id="${{secrets.VERACODE_APP_ID}}" --json_output_file="results.json"
+  #     continue-on-error: true
 
-    - uses: actions/upload-artifact@v2
-      with:
-        name: ScanResults
-        path: /github/home/target/results.json
+  #   - uses: actions/upload-artifact@v2
+  #     with:
+  #       name: ScanResults
+  #       path: /github/home/target/results.json
 
-  # Convert pipeline scan output to SARIF format  
-  process-results:
-    needs: pipeline-scan
-    runs-on: ubuntu-latest
-    steps:
+  # # Convert pipeline scan output to SARIF format  
+  # process-results:
+  #   needs: pipeline-scan
+  #   runs-on: ubuntu-latest
+  #   steps:
 
-    - name: Retrieve results
-      uses: actions/download-artifact@v2
-      with:
-        name: ScanResults
+  #   - name: Retrieve results
+  #     uses: actions/download-artifact@v2
+  #     with:
+  #       name: ScanResults
 
-    - name: convert
-      uses: veracode/veracode-pipeline-scan-results-to-sarif@master
-      with:
-        pipeline-results-json: results.json
-        output-results-sarif: veracode-results.sarif
-        finding-rule-level: "4:3:0"
+  #   - name: convert
+  #     uses: veracode/veracode-pipeline-scan-results-to-sarif@master
+  #     with:
+  #       pipeline-results-json: results.json
+  #       output-results-sarif: veracode-results.sarif
+  #       finding-rule-level: "4:3:0"
         
-    - uses: actions/upload-artifact@v2
-      with:
-        name: SarifFile
-        path: veracode-results.sarif
+  #   - uses: actions/upload-artifact@v2
+  #     with:
+  #       name: SarifFile
+  #       path: veracode-results.sarif
         
-    - uses: github/codeql-action/upload-sarif@v2
-      with:
-    # Path to SARIF file relative to the root of the repository
-        sarif_file: veracode-results.sarif     
+  #   - uses: github/codeql-action/upload-sarif@v2
+  #     with:
+  #   # Path to SARIF file relative to the root of the repository
+  #       sarif_file: veracode-results.sarif     
